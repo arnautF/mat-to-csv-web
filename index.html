@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>.MAT to .CSV TRAINSET Compatible Converter</title>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+    }
+
+    .left-panel {
+      flex: 1;
+      padding: 30px;
+      border-right: 2px solid #ccc;
+    }
+
+    .right-panel {
+      width: 35%;
+      padding: 30px;
+      background-color: #f9f9f9;
+      overflow-y: auto;
+    }
+
+    input, button, select {
+      margin: 10px 0;
+      padding: 8px;
+      font-size: 16px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="left-panel">
+      <h1>.MAT to .CSV TRAINSET Compatible Converter</h1>
+      <input type="file" id="fileInput" accept=".mat"><br>
+      Downsampling factor: <input type="number" id="downsample" value="1" min="1"><br>
+      <button onclick="runPython()">Convert and Download CSV file</button>
+      <p id="status"></p>
+    </div>
+
+    <div class="right-panel">
+      <h2>Information</h2>
+      <p>This tool was developed by Filip Arnaut from the Institute of Physics Belgrade, University of Belgrade, as part of the research paper titled:</p>
+
+<p style="text-align: center; font-weight: bold; font-size: 1em;">
+  "Multi-Class Machine Learning Classification of Ionospheric VLF Data Anomaly Detection: Dataset and Framework"
+</p>
+
+<p><p>The tool enables users who have downloaded .mat (MATLAB) ionospheric VLF amplitude data from 
+  <a href="https://waldo.world/" target="_blank">Waldo World</a> to quickly and easily convert the data into a CSV file compatible with the <a href="https://trainset.geocene.com/" target="_blank">TRAINSET</a> format- a browser-based tool for data labeling/classification. </p>
+
+<p style="text-align: left; font-weight: bold; font-size: 1.3em;"> How it works </p>
+
+<p style="text-align: left; font-weight: bold; font-size: 1.1em;">1.  Upload Your File </p>
+<p>Click the “Choose File” button and upload your .mat (MATLAB) file containing VLF amplitude data. The file should contain the standard metadata and data array typically provided by Waldo World.</p>
+
+<p style="text-align: left; font-weight: bold; font-size: 1.1em;">2. Set Downsampling (Optional) </p>
+
+<p>Choose a downsampling factor if you'd like to reduce the number of data points. For example, selecting 5 keeps every 5th data point. Set it to 1 if you want to keep all data.</p>
+
+<p style="text-align: left; font-weight: bold; font-size: 1.1em;">3. Convert and Download </p>
+
+<p>Click “Convert and Download CSV.” The tool will extract the data, generate timestamps based on the metadata in the file, and export the dataset in TRAINSET format. This includes:</p>
+<p>- series: pre-filled with "series_a"</p>
+<p>- timestamp: in ISO8601 format</p>
+<p>- value: the VLF amplitude value</p>
+<p>- label: set to "Normal" by default</p>
+
+<p style="text-align: left; font-weight: bold; font-size: 1.1em;">4. Use the Output </p>
+
+<p>The generated CSV can be loaded directly into the TRAINSET tool for further processing.</p>
+
+<p>Its use is free and encouraged for anyone interested. </p>
+
+<p>For further information or inquiries, please contact: <a href="mailto:filip.arnaut@ipb.ac.rs">filip.arnaut@ipb.ac.rs</a>
+</p>
+      
+    </div>
+  </div>
+
+  <script>
+    let pyodideReady = false;
+    let pyodide;
+
+    async function loadPyodideAndPackages() {
+      pyodide = await loadPyodide();
+      await pyodide.loadPackage(["pandas", "micropip"]);
+      await pyodide.runPythonAsync(`
+        import micropip
+        await micropip.install("scipy")
+      `);
+      pyodideReady = true;
+    }
+
+    loadPyodideAndPackages();
+
+    async function runPython() {
+      if (!pyodideReady) {
+        alert("Pyodide is still loading...");
+        return;
+      }
+
+      const fileInput = document.getElementById("fileInput");
+      const downsample = parseInt(document.getElementById("downsample").value);
+      const status = document.getElementById("status");
+
+      if (fileInput.files.length === 0) {
+        alert("Please select a .mat file.");
+        return;
+      }
+
+      const file = fileInput.files[0];
+      const arrayBuffer = await file.arrayBuffer();
+
+      pyodide.FS.writeFile("input.mat", new Uint8Array(arrayBuffer));
+
+      const code = `
+import scipy.io
+import pandas as pd
+from datetime import datetime, timedelta
+
+mat_data = scipy.io.loadmat("input.mat")
+
+start_time = datetime(
+    int(mat_data['start_year'][0][0]),
+    int(mat_data['start_month'][0][0]),
+    int(mat_data['start_day'][0][0]),
+    int(mat_data['start_hour'][0][0]),
+    int(mat_data['start_minute'][0][0]),
+    int(mat_data['start_second'][0][0])
+)
+
+data = mat_data['data'].flatten()
+fs = float(mat_data['Fs'][0][0])
+
+data = data[::${downsample}]
+timestamps = [start_time + timedelta(seconds=i * ${downsample} / fs) for i in range(len(data))]
+
+df = pd.DataFrame({
+    'series': 'series_a',
+    'timestamp': [ts.strftime('%Y-%m-%dT%H:%M:%S+00:00') for ts in timestamps],
+    'value': data,
+    'label': 'Normal'
+})
+
+df.to_csv("output.csv", index=False)
+      `;
+
+      try {
+        status.innerText = "Processing...";
+        await pyodide.runPythonAsync(code);
+        const csvData = pyodide.FS.readFile("output.csv");
+        const blob = new Blob([csvData], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name.replace(".mat", `_formatted_downsample${downsample}.csv`);
+        a.click();
+
+        status.innerText = "Done! CSV downloaded.";
+      } catch (err) {
+        status.innerText = "Error: " + err;
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
