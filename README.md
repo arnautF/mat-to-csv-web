@@ -1,4 +1,4 @@
-# mat-to-csv-web
+# mat-to-csv-TRAINSET compatible-web
 This tool was developed by Filip Arnaut from the Institute of Physics Belgrade, University of Belgrade, as part of the research paper titled:
 
 "Multi-Class Machine Learning Classification of Ionospheric VLF Data Anomaly Detection: Dataset and Framework"
